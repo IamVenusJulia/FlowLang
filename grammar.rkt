@@ -1,7 +1,7 @@
 #lang eopl
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; GRAMÁTICA COMPLETA DE FLOWLANG
+;; GRAMÁTICA COMPLETA DE FLOWLANG - INCLUYENDO PROTOTIPOS
 ;; Venus Juliana Paipilla 2343803
 ;; Daniel Arias Castrillón 2222205
 ;; Proyecto Final - Fundamentos de Lenguajes de Programación
@@ -9,13 +9,33 @@
 ;; Universidad del Valle, 2025
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+; Especificación léxica para FlowLang
+(define scanner-spec-flowlang
+  '((white-sp (whitespace) skip)
+    (comment ("%" (arbno (not #\newline))) skip)
+    (comment ("//" (arbno (not #\newline))) skip)
+    (comment ("/*" (arbno (not "*/")) "*/") skip)
+    (identifier (letter (arbno (or letter digit "_" "-" "?"))) symbol)
+    (string ("\"" (arbno (or (not #\") "\\\"")) "\"") string)
+    (boolean ("true") #t)
+    (boolean ("false") #f)
+    (number (digit (arbno digit)) number)
+    (number ("-" digit (arbno digit)) number)
+    (number (digit (arbno digit) "." digit (arbno digit)) number)
+    (number ("-" digit (arbno digit) "." digit (arbno digit)) number)
+    ; Palabras clave para prototipos
+    (prototipo ("prototipo") symbol)
+    (clone ("clone") symbol)
+    (this ("this") symbol)))
+
 (define grammar-flowlang
   '((program (expression) a-program)
 
     ;;; ==================== EXPRESIONES BÁSICAS ====================
     (expression (number) lit-exp)
     (expression (string) str-exp)
-    (expression (boolean) bool-exp)
+    (expression ("true") true-exp)
+    (expression ("false") false-exp)
     (expression ("null") null-exp)
     (expression (identifier) var-exp)
 
@@ -26,7 +46,8 @@
 
     ;;; ==================== FUNCIONES ====================
     (expression ("func" "(" (separated-list identifier ",") ")" "{" (arbno expression) "return" expression "}") func-exp)
-    (expression (identifier "(" (separated-list expression ",") ")") app-exp)
+    ; Cambio aquí: permitir cualquier expresión como procedimiento
+    (expression (expression "(" (separated-list expression ",") ")") app-exp)
 
     ;;; ==================== ESTRUCTURAS DE CONTROL ====================
     (expression ("if" expression "then" expression "else" expression "end") if-exp)
@@ -42,6 +63,13 @@
     
     ; Diccionarios
     (expression ("{" (separated-list identifier ":" expression ",") "}") dict-exp)
+
+    ;;; ==================== PROTOTIPOS (SECCIÓN 2.3) ====================
+    (expression ("prototipo" identifier "=" expression ";") prototype-decl-exp)
+    (expression ("clone" "(" expression ")") clone-exp)
+    (expression ("this") this-exp)
+    (expression (expression "." identifier) field-access-exp)
+    (expression (expression "." identifier "=" expression) field-assign-exp)
 
     ;;; ==================== PRIMITIVAS BOOLEANAS ====================
     (expression (pred-prim "(" expression "," expression ")") pred-prim-exp)
@@ -109,18 +137,3 @@
     (type-exp ("dict") dict-type-exp)
     (type-exp ("(" (separated-list type-exp "*") "->" type-exp ")") proc-type-exp)
     ))
-
-; Especificación léxica para FlowLang
-(define scanner-spec-flowlang
-  '((white-sp (whitespace) skip)
-    (comment ("%" (arbno (not #\newline))) skip)
-    (comment ("//" (arbno (not #\newline))) skip)
-    (comment ("/*" (arbno (not "*/")) "*/") skip)
-    (identifier (letter (arbno (or letter digit "_" "-" "?"))) symbol)
-    (string ("\"" (arbno (or (not #\") "\\\"")) "\"") string)
-    (boolean ("true") #t)
-    (boolean ("false") #f)
-    (number (digit (arbno digit)) number)
-    (number ("-" digit (arbno digit)) number)
-    (number (digit (arbno digit) "." digit (arbno digit)) number)
-    (number ("-" digit (arbno digit) "." digit (arbno digit)) number)))
