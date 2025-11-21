@@ -138,17 +138,12 @@
     ))
 
 ; ==================== GENERAR TIPOS DE DATOS ====================
-(sllgen:make-define-datatypes scanner-spec-flowlang grammar-flowlang)
 
-(define show-the-datatypes
-  (lambda () (sllgen:list-define-datatypes scanner-spec-flowlang grammar-flowlang)))
+(sllgen:make-define-datatypes especificacion-lexica especificacion-gramatical)
 
-; Parser y Scanner
-(define scan&parse
-  (sllgen:make-string-parser scanner-spec-flowlang grammar-flowlang))
-
-(define just-scan
-  (sllgen:make-string-scanner scanner-spec-flowlang grammar-flowlang))
+;Parser y Scanner
+(define analizar-cadena
+  (sllgen:make-string-parser especificacion-lexica especificacion-gramatical))
 
 ; ==================== IMPLEMENTACIÓN DEL INTERPRETADOR ====================
 
