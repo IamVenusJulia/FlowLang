@@ -9,88 +9,133 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ; Especificación léxica
-(define scanner-spec-flowlang
-  '((white-sp (whitespace) skip)
-    (comment ("%" (arbno (not #\newline))) skip)
-    (identifier (letter (arbno (or letter digit "?"))) symbol)
-    (string ("\"" (arbno (or (not #\") "\\\"")) "\"") string)
-    (number (digit (arbno digit)) number)
-    (number ("-" digit (arbno digit)) number)
-    (float (digit (arbno digit) "." digit (arbno digit)) number)
-    (float ("-" digit (arbno digit) "." digit (arbno digit)) number)))
 
-; Gramática simplificada y corregida
-(define grammar-flowlang
-  '((program (expression) a-program)
+(define especificacion-lexica
+  '((espacio-blanco (whitespace) skip)
+    (comentario ("%" (arbno (not #\newline))) skip)
+    (identificador
+      (letter (arbno (or letter digit "_" "-" "?")))
+      symbol)
+    (numero (digit (arbno digit)) number)
+    (numero ("-" digit (arbno digit)) number)
+    (numero (digit (arbno digit) "." digit (arbno digit)) number)
+    (numero ("-" digit (arbno digit) "." digit (arbno digit)) number)
+    (cadena ("\"" (arbno (not #\")) "\"") string)))
+
+;Gramática simplificada y corregida
+
+(define especificacion-gramatical
+  '((programa (expresion) un-programa)
+
+    ;expresiones básicas
+    (expresion (numero) literal-numero)
+    (expresion (cadena) literal-cadena)
+    (expresion (identificador (arbno "." identificador)) acceso-identificador)
+    (expresion ("true") verdadero-exp)
+    (expresion ("false") falso-exp)
+    (expresion ("null") nulo-exp)
+    (expresion ("this") este-exp)
+
+
+    ;declaraciones y asignaciones
+    (expresion ("var" (separated-list identificador "=" expresion ",") "in" expresion) 
+               declaracion-var)
+    (expresion ("const" (separated-list identificador "=" expresion ",") "in" expresion) 
+               declaracion-const)
+    (expresion ("prototipo" identificador "=" expresion "in" expresion) 
+               declaracion-prototipo)
+    (expresion ("set" identificador "=" expresion) 
+               asignacion-exp)
     
-    ; Expresiones básicas
-    (expression (number) lit-exp)
-    (expression (string) str-exp)
-    (expression (identifier) var-exp)
-    (expression ("true") true-exp)
-    (expression ("false") false-exp)
-    (expression ("null") null-exp)
-    (expression ("vacio") empty-exp)
-    (expression ("(" expression ")") paren-exp)
+;estructurs de control
+    (expresion
+      ("if" expresion "then" expresion "else" expresion "end")
+      condicional-si)
+    (expresion
+      ("switch" expresion (arbno "case" expresion ":" expresion) "default" ":" expresion "end")
+      condicional-switch)
+
+;Funciones
+    (expresion
+      ("func" "(" (separated-list identificador ",") ")" expresion)
+      definicion-funcion)
+    (expresion
+      ("(" expresion (arbno expresion) ")")
+      aplicacion-funcion)
+    (expresion
+      ("letrec" (separated-list identificador "(" (separated-list identificador ",") ")" "=" expresion ";")
+       "in" expresion)
+      letrec-exp)
     
-    ; Declaraciones y asignaciones
-    (expression ("var" identifier "=" expression) var-decl-exp)
-    (expression ("const" identifier "=" expression) const-decl-exp)
-    (expression ("set" identifier "=" expression) assign-exp)
+    ;numeros complejos
+    (expresion ("complejo" "(" expresion "," expresion ")") 
+               complejo-exp)
+
+    ;primitivas e iteraciones
+    (expresion
+      (primitiva "(" (separated-list expresion ",") ")")
+      aplicacion-primitiva)
     
-    ; Estructuras de control
-    (expression ("if" expression "then" expression "else" expression) if-exp)
-    (expression ("while" expression "do" expression "done") while-exp)
-    (expression ("for" identifier "in" expression "do" expression "done") for-exp)
-    (expression ("begin" expression (arbno expression) "end") begin-exp)
+    (expresion
+      ("while" expresion "do" expresion "done")
+      iteracion-mientras)
+    (expresion
+      ("for" identificador "in" expresion "do" expresion "done")
+      iteracion-para)
+
     
-    ; Funciones
-    (expression ("func" "(" (separated-list identifier ",") ")" "{" expression "}") func-exp)
-    (expression ("return" expression) return-exp)
-    
-    ; Llamadas a funciones (usando una notación específica para evitar conflictos)
-    (expression ("call" identifier "(" (separated-list expression ",") ")") func-call-exp)
-    
-    ; Listas
-    (expression ("[" (separated-list expression ",") "]") list-exp)
-    
-    ; Primitivas (sin conflicto con llamadas regulares)
-    (expression (primitive "(" (separated-list expression ",") ")") primapp-exp)
-    
+
+    ;secuencias
+    (expresion
+      ("begin" expresion (arbno ";" expresion) "end")
+      secuencia-begin)
+
+    ;literales
+    (expresion ("[" (separated-list expresion ",") "]") 
+               literal-lista)
+
     ; Primitivas
-    (primitive ("+") add-prim)
-    (primitive ("-") substract-prim)
-    (primitive ("*") mult-prim)
-    (primitive ("/") div-prim)
-    (primitive ("%") mod-prim)
-    (primitive ("add1") incr-prim)
-    (primitive ("sub1") decr-prim)
-    (primitive ("zero?") zero-test-prim)
-    (primitive (">") greater-prim)
-    (primitive ("<") less-prim)
-    (primitive (">=") greater-equal-prim)
-    (primitive ("<=") less-equal-prim)
-    (primitive ("==") equal-prim)
-    (primitive ("!=") not-equal-prim)
-    (primitive ("and") and-prim)
-    (primitive ("or") or-prim)
-    (primitive ("not") not-prim)
-    (primitive ("longitud") strlen-prim)
-    (primitive ("concatenar") strcat-prim)
-    (primitive ("vacio?") empty-test-prim)
-    (primitive ("crear-lista") cons-prim)
-    (primitive ("lista?") list-test-prim)
-    (primitive ("cabeza") car-prim)
-    (primitive ("cola") cdr-prim)
-    (primitive ("append") append-prim)
-    (primitive ("ref-list") list-ref-prim)
-    (primitive ("set-list") list-set-prim)
-    (primitive ("diccionario?") dict-test-prim)
-    (primitive ("crear-diccionario") make-dict-prim)
-    (primitive ("ref-diccionario") dict-ref-prim)
-    (primitive ("set-diccionario") dict-set-prim)
-    (primitive ("claves") keys-prim)
-    (primitive ("valores") values-prim)))
+    (primitiva ("+") primitiva-suma)
+    (primitiva ("-") primitiva-resta)
+    (primitiva ("*") primitiva-multiplicacion)
+    (primitiva ("/") primitiva-division)
+    (primitiva ("mod") primitiva-modulo)
+    (primitiva ("add1") primitiva-incremento)
+    (primitiva ("sub1") primitiva-decremento)
+    (primitiva ("zero?") primitiva-cero?)
+    (primitiva ("<") primitiva-menor)
+    (primitiva (">") primitiva-mayor)
+    (primitiva ("<=") primitiva-menor-igual)
+    (primitiva (">=") primitiva-mayor-igual)
+    (primitiva ("==") primitiva-igual)
+    (primitiva ("<>") primitiva-diferente)
+    (primitiva ("and") primitiva-y)
+    (primitiva ("or") primitiva-o)
+    (primitiva ("not") primitiva-no)
+    (primitiva ("longitud") primitiva-longitud)
+    (primitiva ("concatenar") primitiva-concatenar)
+    (primitiva ("vacio") primitiva-lista-vacia)
+    (primitiva ("vacio?") primitiva-lista-vacia?)
+    (primitiva ("crear-lista") primitiva-construir-lista)
+    (primitiva ("lista?") primitiva-es-lista?)
+    (primitiva ("cabeza") primitiva-cabeza)
+    (primitiva ("cola") primitiva-cola)
+    (primitiva ("append") primitiva-concatenar-listas)
+    (primitiva ("ref-list") primitiva-referencia-lista)
+    (primitiva ("set-list") primitiva-asignar-lista)
+    (primitiva ("crear-diccionario") primitiva-crear-diccionario)
+    (primitiva ("diccionario?") primitiva-es-diccionario?)
+    (primitiva ("ref-diccionario") primitiva-referencia-diccionario)
+    (primitiva ("set-diccionario") primitiva-asignar-diccionario)
+    (primitiva ("claves") primitiva-obtener-claves)
+    (primitiva ("valores") primitiva-obtener-valores)
+    (primitiva ("clone") primitiva-clonar)
+    (primitiva ("print") primitiva-imprimir)
+    (primitiva ("real") primitiva-parte-real)
+    (primitiva ("imag") primitiva-parte-imaginaria)
+    (primitiva ("get-field") primitiva-obtener-campo)
+    (primitiva ("call-method") primitiva-invocar-metodo)
+    ))
 
 ; ==================== GENERAR TIPOS DE DATOS ====================
 (sllgen:make-define-datatypes scanner-spec-flowlang grammar-flowlang)
