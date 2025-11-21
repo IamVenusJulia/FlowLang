@@ -147,23 +147,33 @@
 
 ; ==================== IMPLEMENTACIÓN DEL INTERPRETADOR ====================
 
+
 ; Definición de tipos para valores expresados
-(define-datatype expval expval?
-  (num-val (num number?))
-  (bool-val (bool boolean?))
-  (str-val (str string?))
-  (list-val (lst list?))
-  (dict-val (dict list?))
-  (proc-val (proc proc?))
-  (null-val))
+(define-datatype valor-expresado valor-expresado?
+  (valor-numero (num number?))
+  (valor-complejo (parte-real number?) (parte-imag number?))
+  (valor-booleano (bool boolean?))
+  (valor-cadena (str string?))
+  (valor-nulo)
+  (valor-lista (elementos vector?))
+  (valor-prototipo (campos vector?))
+  (valor-procedimiento (proc procedimiento?)))
 
-; Definición de procedimientos
-(define-datatype proc proc?
-  (procedure
-   (vars (list-of symbol?))
-   (body expression?)
-   (env environment?)))
+(define valor-verdadero?
+  (lambda (val)
+    (cases valor-expresado val
+      (valor-booleano (b) b)
+      (valor-numero (n) (not (zero? n)))
+      (valor-cadena (s) (not (string=? s "")))
+      (valor-nulo () #f)
+      (else #t))))
 
+;Definición de procedimientos
+(define-datatype procedimiento procedimiento?
+  (cierre
+    (parametros (list-of symbol?))
+    (cuerpo expresion?)
+    (ambiente-guardado ambiente?)))
 ; Definición de referencia para ambientes mutables
 (define-datatype reference reference?
   (a-ref (pos integer?)
