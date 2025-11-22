@@ -2,7 +2,8 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; FLOWLANG
-;; Venus Juliana Paipilla y Daniel Arias Castrillón
+;; Venus Juliana Paipilla - 2343803
+;; Daniel Arias Castrillón - 2222205
 ;; Proyecto Final - Fundamentos de Lenguajes de Programación
 ;; Profesor: Robinson Duque, Ph.D
 ;; Universidad del Valle, 2025
@@ -32,6 +33,10 @@
     
     ; Binding auxiliar para letrec
     (declaracion-letrec (identificador "(" (separated-list identificador ",") ")" "=" expresion) una-declaracion-letrec)
+    
+    ; --- Nonterminal para Herencia Opcional ---
+    (clausula-extends () no-extends) ; Opción 1: vacío
+    (clausula-extends ("extends" identificador ";") con-extends) ; Opción 2: herencia
 
     ; Expresiones Básicas
     (expresion (numero) literal-numero)
@@ -66,7 +71,8 @@
     (expresion ("begin" expresion (arbno ";" expresion) "end") begin-exp)
 
     ; Estructuras de Datos
-    (expresion ("{" (separated-list binding ",") "}") record-exp)
+    (expresion ("{" clausula-extends (separated-list binding ",") "}") record-exp)
+    
     (expresion ("[" (separated-list expresion ",") "]") list-exp)
     (expresion ("complejo" "(" expresion "," expresion ")") complejo-exp)
 
@@ -214,9 +220,9 @@
   (void-val)
   (complex-val (real number?) (imag number?))
   (list-val (lst (list-of expval?)))
-  ; CAMPOS RENOMBRADOS para evitar problemas de vinculación
   (proto-val (fields vector?) ; Vector de pares (id . valor) - MUTABLE
-             (env environment?)) ; Entorno this (circular)
+             (env environment?) ; Entorno this (circular)
+             (parent expval?)) ; Campo para el prototipo padre
   (proc-val (p proc?)))
 
 ;; 5. VALORES INICIALES
@@ -253,6 +259,25 @@
       ((null? dict) '())
       ((equal? (car (car dict)) key) (remove-assoc key (cdr dict)))
       (else (cons (car dict) (remove-assoc key (cdr dict)))))))
+      
+; --- Lógica de Búsqueda de Campos con Delegación (Herencia) ---
+; 
+(define find-field-in-object 
+  (lambda (obj field-id)
+    (cases expval obj
+      (proto-val (fields-vec this-env parent)
+        (let* ((fields-list (vector-ref fields-vec 0))
+               (search (assoc field-id fields-list)))
+          (if search
+              (cdr search) ; Campo encontrado en este objeto
+              
+              ; Delegación: Si no se encuentra, buscar en el prototipo padre
+              (cases expval parent
+                (null-val () 
+                  (eopl:error "Campo no encontrado: ~s" field-id))
+                (else 
+                  (find-field-in-object parent field-id))))))
+      (else (eopl:error "find-field-in-object requiere un objeto proto-val")))))
 
 ;; 7. INTÉRPRETE (EVALUADOR)
 
@@ -286,13 +311,9 @@
           (if (null? ids)
               curr-val
               (cases expval curr-val
-                (proto-val (fields-vec this-env) ; <-- Actualizado
-                   (let* ((fields-list (vector-ref fields-vec 0))
-                          (search (assoc (car ids) fields-list)))
-                     (if search
-                         (loop (cdr search) (cdr ids))
-                         (eopl:error "Campo no encontrado:" (car ids)))))
-                (else (eopl:error "No es un objeto:" curr-val))))))
+                (proto-val (fields-vec this-env parent)
+                   (loop (find-field-in-object curr-val (car ids)) (cdr ids))) 
+                (else (eopl:error "No es un objeto o campo inexistente en la cadena de prototipos: ~s" curr-val))))))
 
       (var-exp (bindings body)
         (let ((ids (map un-binding-id bindings))
@@ -304,7 +325,6 @@
               (vals (eval-rands (map un-binding-exp bindings) env)))
           (eval-expression body (extend-env-list-const ids vals env)))) ; Usa entorno inmutable
 
-      ; NUEVO: Usa setref! para validar si es const
       (set-exp (id exp)
         (let ((val (eval-expression exp env))
               (ref (apply-env-ref env id)))
@@ -342,7 +362,8 @@
             (if (null? lhs-list)
                 (eval-expression default env)
                 (let ((case-val (eval-expression (car lhs-list) env)))
-                  (if (equal? (expval->num test-val) (expval->num case-val))
+                  ; Simplificamos la comparación para tipos base
+                  (if (equal? (expval->num test-val) (expval->num case-val)) 
                       (eval-expression (car rhs-list) env)
                       (loop (cdr lhs-list) (cdr rhs-list))))))))
       
@@ -364,50 +385,52 @@
               (cases proc p
                 (procedure (params body saved-env)
                   (if (= (length params) (length args))
-                      
-                      ; NUEVO: Determinar si inyectar 'this' para métodos
-                      (let ((new-env saved-env)) ; Aquí se requiere más refinamiento para métodos
-                        (eval-expression body (extend-env-list params args new-env)))
-                      
+                      (eval-expression body (extend-env-list params args saved-env))
                       (eopl:error "Num argumentos incorrecto")))))
             (else (eopl:error "No es un procedimiento")))))
 
       (return-exp (exp) (eval-expression exp env))
 
-      ; --- Estructuras de Datos ---
-      (list-exp (exps)
-        (list-val (eval-rands exps env)))
-
-      ; Implementación de Record (Objeto) - Usando mutación temporal
-      (record-exp (bindings)
-        (let ((ids (map un-binding-id bindings))
-              (vals-exps (map un-binding-exp bindings)))
+      ; --- Estructuras de Datos (Record / Objeto con Herencia) ---
+      (record-exp (parent-clause bindings) 
+        (let* ((ids (map un-binding-id bindings))
+               (vals-exps (map un-binding-exp bindings))
+               
+               ; 1. Obtener el prototipo padre
+               (parent-val (cases clausula-extends parent-clause
+                             (no-extends () (null-val))
+                             (con-extends (parent-id) (apply-env env parent-id)))))
           
-          ; 1. Crear un entorno con 'this' como una variable mutable (var)
+          ; 2. Crear un entorno con 'this' como una variable mutable (var)
           (let* ((env-with-this (extend-env-list '(this) (list (void-val)) env))
-                 ; 2. Obtener la referencia mutable (a-ref) para 'this'
+                 ; 3. Obtener la referencia mutable (a-ref) para 'this'
                  (this-ref (apply-env-ref env-with-this 'this)))
             
-            ; 3. Crear el objeto con el 'env-with-this'
+            ; 4. Crear el objeto con el entorno circular y el padre
             (let ((real-record-val (proto-val 
-                                     (vector (make-list (length ids) '())) ; fields
-                                     env-with-this))) ; env
+                                     (vector (make-list (length ids) '())) ; fields (placeholder)
+                                     env-with-this ; env
+                                     parent-val))) ; <-- Usar parent-val
               
-              ; 4. Mutar el valor de la variable 'this' para que apunte al objeto recién creado
+              ; 5. Mutar el valor de la variable 'this' para que apunte al objeto recién creado
               (setref! this-ref real-record-val)
               
-              ; 5. Evaluar las expresiones de campo/método usando el entorno ahora circular
+              ; 6. Evaluar las expresiones de campo/método usando el entorno ahora circular
               (let ((vals (eval-rands vals-exps env-with-this)))
                 
-                ; 6. Construir la lista final de campos/métodos
+                ; 7. Construir la lista final de campos/métodos
                 (let ((fields-list (map cons ids vals)))
                   
-                  ; 7. Actualizar el vector interno del objeto usando el nuevo accessor: proto-val->fields
+                  ; 8. Actualizar el vector interno del objeto
                   (vector-set! (proto-val->fields real-record-val) 0 fields-list) 
                   
-                  ; 8. Retornar el objeto final
+                  ; 9. Retornar el objeto final
                   real-record-val))))))
 
+      (list-exp (exps)
+        (list-val (eval-rands exps env)))
+        
+      ; CORRECCIÓN: Usar 'complejo-exp' en lugar de 'complex-exp'
       (complejo-exp (r i)
         (let ((rv (eval-expression r env)) (iv (eval-expression i env)))
           (complex-val (expval->num rv) (expval->num iv))))
@@ -418,11 +441,9 @@
               (id-lists   (map (lambda (decl) (cases declaracion-letrec decl (una-declaracion-letrec (id params body) params))) decls))
               (bodies     (map (lambda (decl) (cases declaracion-letrec decl (una-declaracion-letrec (id params body) body))) decls)))
            
-           ; Creamos entorno mutable extendiendo 'env'
            (let* ((dummy-env (extend-env-list proc-names (make-list (length proc-names) (void-val)) env)))
              (let ((procs (map (lambda (ids bdy) (proc-val (procedure ids bdy dummy-env)))
                                id-lists bodies)))
-               ; Usamos referencias para actualizar el entorno circular
                (let loop ((names proc-names) (vals procs))
                  (if (null? names)
                      #t
@@ -445,13 +466,9 @@
 (define expval->list (lambda (v) (cases expval v (list-val (l) l) (else (eopl:error "Esperaba lista")))))
 (define expval->complex (lambda (v) (cases expval v (complex-val (r i) (cons r i)) (else (eopl:error "Esperaba complejo")))))
 
-; Definiciones explícitas de accessors para proto-val
 (define proto-val->fields 
   (lambda (v) 
-    (cases expval v (proto-val (fields env) fields) (else (eopl:error "Esperaba un objeto proto-val")))))
-(define proto-val->env 
-  (lambda (v) 
-    (cases expval v (proto-val (fields env) env) (else (eopl:error "Esperaba un objeto proto-val")))))
+    (cases expval v (proto-val (fields env parent) fields) (else (eopl:error "Esperaba un objeto proto-val")))))
 
 (define apply-primitive
   (lambda (prim args)
@@ -538,7 +555,13 @@
                                                         (cdr lst))))))
                        "]"))
       (complex-val (r i) (string-append (number->string r) "+" (number->string i) "i"))
-      (proto-val (f e) "{objeto}") ; Solo mostramos {objeto}
+      ; Imprimimos el objeto, si tiene padre, lo muestra (pero no recursivamente)
+      (proto-val (f e p) 
+        (string-append "{objeto" 
+                       (cases expval p
+                         (null-val () "")
+                         (else " extends ...")) ; Evitamos imprimir recursivamente el padre completo
+                       "}"))
       (proc-val (p) "#<procedure>"))))
 
 (define run
