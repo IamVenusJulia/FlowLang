@@ -131,7 +131,7 @@
 
 ;; 4. DEFINICIÓN DE DATATYPES EN TIEMPO DE EJECUCIÓN Y REFERENCIAS
 
-;; --- NUEVO: Referencias para manejo de const vs var ---
+;; --- Referencias para manejo de const vs var ---
 (define-datatype reference reference?
   (a-ref (position integer?) (vec vector?))
   (const-ref (value expval?)))
@@ -214,7 +214,9 @@
   (void-val)
   (complex-val (real number?) (imag number?))
   (list-val (lst (list-of expval?)))
-  (proto-val (fields vector?)) 
+  ; CAMPOS RENOMBRADOS para evitar problemas de vinculación
+  (proto-val (fields vector?) ; Vector de pares (id . valor) - MUTABLE
+             (env environment?)) ; Entorno this (circular)
   (proc-val (p proc?)))
 
 ;; 5. VALORES INICIALES
@@ -273,7 +275,10 @@
       (literal-booleano-true () (bool-val #t))
       (literal-booleano-false () (bool-val #f))
       (literal-nulo () (null-val))
-      (literal-this () (eopl:error "uso de 'this' fuera de contexto"))
+      
+      ; IMPLEMENTACIÓN DE 'THIS'
+      (literal-this () 
+        (apply-env env 'this))
 
       ; --- Variables y Asignación ---
       (identificador-exp (first-id rest-ids)
@@ -281,9 +286,9 @@
           (if (null? ids)
               curr-val
               (cases expval curr-val
-                (proto-val (vec)
-                   (let* ((fields (vector-ref vec 0))
-                          (search (assoc (car ids) fields)))
+                (proto-val (fields-vec this-env) ; <-- Actualizado
+                   (let* ((fields-list (vector-ref fields-vec 0))
+                          (search (assoc (car ids) fields-list)))
                      (if search
                          (loop (cdr search) (cdr ids))
                          (eopl:error "Campo no encontrado:" (car ids)))))
@@ -359,7 +364,11 @@
               (cases proc p
                 (procedure (params body saved-env)
                   (if (= (length params) (length args))
-                      (eval-expression body (extend-env-list params args saved-env))
+                      
+                      ; NUEVO: Determinar si inyectar 'this' para métodos
+                      (let ((new-env saved-env)) ; Aquí se requiere más refinamiento para métodos
+                        (eval-expression body (extend-env-list params args new-env)))
+                      
                       (eopl:error "Num argumentos incorrecto")))))
             (else (eopl:error "No es un procedimiento")))))
 
@@ -369,23 +378,47 @@
       (list-exp (exps)
         (list-val (eval-rands exps env)))
 
+      ; Implementación de Record (Objeto) - Usando mutación temporal
       (record-exp (bindings)
         (let ((ids (map un-binding-id bindings))
-              (vals (eval-rands (map un-binding-exp bindings) env)))
-          (proto-val (vector (map cons ids vals)))))
+              (vals-exps (map un-binding-exp bindings)))
+          
+          ; 1. Crear un entorno con 'this' como una variable mutable (var)
+          (let* ((env-with-this (extend-env-list '(this) (list (void-val)) env))
+                 ; 2. Obtener la referencia mutable (a-ref) para 'this'
+                 (this-ref (apply-env-ref env-with-this 'this)))
+            
+            ; 3. Crear el objeto con el 'env-with-this'
+            (let ((real-record-val (proto-val 
+                                     (vector (make-list (length ids) '())) ; fields
+                                     env-with-this))) ; env
+              
+              ; 4. Mutar el valor de la variable 'this' para que apunte al objeto recién creado
+              (setref! this-ref real-record-val)
+              
+              ; 5. Evaluar las expresiones de campo/método usando el entorno ahora circular
+              (let ((vals (eval-rands vals-exps env-with-this)))
+                
+                ; 6. Construir la lista final de campos/métodos
+                (let ((fields-list (map cons ids vals)))
+                  
+                  ; 7. Actualizar el vector interno del objeto usando el nuevo accessor: proto-val->fields
+                  (vector-set! (proto-val->fields real-record-val) 0 fields-list) 
+                  
+                  ; 8. Retornar el objeto final
+                  real-record-val))))))
 
       (complejo-exp (r i)
         (let ((rv (eval-expression r env)) (iv (eval-expression i env)))
           (complex-val (expval->num rv) (expval->num iv))))
 
       ; --- Recursión (letrec) ---
-      ; CORRECCIÓN: Usar 'env' (el actual) como padre para el entorno dummy
       (letrec-exp (decls body)
         (let ((proc-names (map (lambda (decl) (cases declaracion-letrec decl (una-declaracion-letrec (id params body) id))) decls))
               (id-lists   (map (lambda (decl) (cases declaracion-letrec decl (una-declaracion-letrec (id params body) params))) decls))
               (bodies     (map (lambda (decl) (cases declaracion-letrec decl (una-declaracion-letrec (id params body) body))) decls)))
            
-           ; Creamos entorno mutable extendiendo 'env', no 'dummy-env' (que no existe)
+           ; Creamos entorno mutable extendiendo 'env'
            (let* ((dummy-env (extend-env-list proc-names (make-list (length proc-names) (void-val)) env)))
              (let ((procs (map (lambda (ids bdy) (proc-val (procedure ids bdy dummy-env)))
                                id-lists bodies)))
@@ -411,6 +444,14 @@
 (define expval->string (lambda (v) (cases expval v (string-val (s) s) (else (eopl:error "Esperaba cadena")))))
 (define expval->list (lambda (v) (cases expval v (list-val (l) l) (else (eopl:error "Esperaba lista")))))
 (define expval->complex (lambda (v) (cases expval v (complex-val (r i) (cons r i)) (else (eopl:error "Esperaba complejo")))))
+
+; Definiciones explícitas de accessors para proto-val
+(define proto-val->fields 
+  (lambda (v) 
+    (cases expval v (proto-val (fields env) fields) (else (eopl:error "Esperaba un objeto proto-val")))))
+(define proto-val->env 
+  (lambda (v) 
+    (cases expval v (proto-val (fields env) env) (else (eopl:error "Esperaba un objeto proto-val")))))
 
 (define apply-primitive
   (lambda (prim args)
@@ -497,7 +538,7 @@
                                                         (cdr lst))))))
                        "]"))
       (complex-val (r i) (string-append (number->string r) "+" (number->string i) "i"))
-      (proto-val (v) "{objeto}")
+      (proto-val (f e) "{objeto}") ; Solo mostramos {objeto}
       (proc-val (p) "#<procedure>"))))
 
 (define run
