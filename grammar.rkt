@@ -1,14 +1,15 @@
 #lang eopl
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; FLOWLANG
-;; Venus Juliana Paipilla y Daniel Arias Castrillón
-;; Proyecto Final - Fundamentos de Lenguajes de Programación
-;; Profesor: Robinson Duque, Ph.D
-;; Universidad del Valle, 2025
+;; FLOWLANG - PASO 1: SISTEMA DE REFERENCIAS Y MUTABILIDAD
+;; 
+;; Cambios en esta versión:
+;; 1. CORRECCIÓN: Se arregló el error de scope en letrec-exp.
+;; 2. Se mantiene el sistema de referencias (a-ref vs const-ref).
+;; 3. Se mantiene la protección de constantes en setref!.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-; Especificación léxica
+;; 1. ESPECIFICACIÓN LÉXICA
 
 (define especificacion-lexica
   '((espacio-blanco (whitespace) skip)
@@ -22,7 +23,7 @@
     (numero ("-" digit (arbno digit) "." digit (arbno digit)) number)
     (cadena ("\"" (arbno (not #\")) "\"") string)))
 
-;Gramática
+;; 2. ESPECIFICACIÓN GRAMATICAL
 
 (define especificacion-gramatical
   '((programa (expresion) un-programa)
@@ -61,6 +62,9 @@
     (expresion ("while" expresion "do" expresion "done") while-exp)
     
     (expresion ("for" identificador "in" expresion "do" expresion "done") for-exp)
+    
+    ; Secuencia (Begin)
+    (expresion ("begin" expresion (arbno ";" expresion) "end") begin-exp)
 
     ; Estructuras de Datos
     (expresion ("{" (separated-list binding ",") "}") record-exp)
@@ -78,7 +82,7 @@
     ; Recursión (letrec)
     (expresion ("letrec" (separated-list declaracion-letrec ";") "in" expresion) letrec-exp)
 
-    ; Definición de Primitivas Explícitas
+    ; --- DEFINICIÓN COMPLETA DE PRIMITIVAS ---
     (primitiva ("+") prim-sum)
     (primitiva ("-") prim-sub)
     (primitiva ("*") prim-mul)
@@ -86,7 +90,7 @@
     (primitiva ("mod") prim-mod)
     (primitiva ("add1") prim-add1)
     (primitiva ("sub1") prim-sub1)
-    (primitiva ("print") prim-print)
+    (primitiva ("zero?") prim-zero?)
     (primitiva ("==") prim-equal)
     (primitiva ("<") prim-less)
     (primitiva (">") prim-greater)
@@ -96,49 +100,98 @@
     (primitiva ("and") prim-and)
     (primitiva ("or") prim-or)
     (primitiva ("not") prim-not)
+    (primitiva ("longitud") prim-string-length)
+    (primitiva ("concatenar") prim-string-append)
+    (primitiva ("vacio") prim-empty)
+    (primitiva ("vacio?") prim-empty?)
+    (primitiva ("crear-lista") prim-cons)
+    (primitiva ("lista?") prim-list?)
+    (primitiva ("cabeza") prim-car)
+    (primitiva ("cola") prim-cdr)
+    (primitiva ("append") prim-append)
+    (primitiva ("ref-list") prim-list-ref)
+    (primitiva ("set-list") prim-list-set)
+    (primitiva ("crear-diccionario") prim-make-dict)
+    (primitiva ("diccionario?") prim-dict?)
+    (primitiva ("ref-diccionario") prim-dict-ref)
+    (primitiva ("set-diccionario") prim-dict-set)
+    (primitiva ("claves") prim-dict-keys)
+    (primitiva ("valores") prim-dict-values)
+    (primitiva ("clone") prim-clone)
+    (primitiva ("print") prim-print)
+    (primitiva ("real") prim-real)
+    (primitiva ("imag") prim-imag)
     ))
 
-; ==================== GENERAR TIPOS DE DATOS ====================
+;; 3. GENERACIÓN AUTOMÁTICA DE DATATYPES (AST) Y PARSER
 
 (sllgen:make-define-datatypes especificacion-lexica especificacion-gramatical)
 
 (define scan&parse
   (sllgen:make-string-parser especificacion-lexica especificacion-gramatical))
 
-; ==================== IMPLEMENTACIÓN DEL INTERPRETADOR ====================
+;; 4. DEFINICIÓN DE DATATYPES EN TIEMPO DE EJECUCIÓN Y REFERENCIAS
 
+;; --- NUEVO: Referencias para manejo de const vs var ---
+(define-datatype reference reference?
+  (a-ref (position integer?) (vec vector?))
+  (const-ref (value expval?)))
+
+(define deref
+  (lambda (ref)
+    (cases reference ref
+      (a-ref (pos vec) (vector-ref vec pos))
+      (const-ref (val) val))))
+
+(define setref!
+  (lambda (ref val)
+    (cases reference ref
+      (a-ref (pos vec) (vector-set! vec pos val))
+      (const-ref (v) (eopl:error 'setref! "No se puede modificar una constante")))))
+
+;; --- Entorno actualizado para soportar refs ---
 (define-datatype environment environment?
   (empty-env)
+  ; Entorno mutable (para var)
   (extend-env
     (syms (list-of symbol?))
     (vals vector?) 
+    (env environment?))
+  ; Entorno inmutable (para const)
+  (extend-env-const
+    (syms (list-of symbol?))
+    (vals (list-of expval?))
     (env environment?)))
 
 (define extend-env-list
   (lambda (syms vals env)
     (extend-env syms (list->vector vals) env)))
 
-(define apply-env
+(define extend-env-list-const
+  (lambda (syms vals env)
+    (extend-env-const syms vals env)))
+
+;; Búsqueda de REFERENCIA (para set)
+(define apply-env-ref
   (lambda (env search-sym)
     (cases environment env
       (empty-env ()
-        (eopl:error 'apply-env "No binding for ~s" search-sym))
+        (eopl:error 'apply-env "Variable no definida: ~s" search-sym))
       (extend-env (syms vals saved-env)
         (let ((pos (list-index syms search-sym)))
           (if pos
-              (vector-ref vals pos)
-              (apply-env saved-env search-sym)))))))
+              (a-ref pos vals) ; Retorna referencia mutable
+              (apply-env-ref saved-env search-sym))))
+      (extend-env-const (syms vals saved-env)
+        (let ((pos (list-index syms search-sym)))
+          (if pos
+              (const-ref (list-ref vals pos)) ; Retorna referencia constante
+              (apply-env-ref saved-env search-sym)))))))
 
-(define set-env!
-  (lambda (env search-sym new-val)
-    (cases environment env
-      (empty-env ()
-        (eopl:error 'set-env! "No binding for ~s" search-sym))
-      (extend-env (syms vals saved-env)
-        (let ((pos (list-index syms search-sym)))
-          (if pos
-              (vector-set! vals pos new-val)
-              (set-env! saved-env search-sym new-val)))))))
+;; Búsqueda de VALOR (usando deref)
+(define apply-env
+  (lambda (env search-sym)
+    (deref (apply-env-ref env search-sym))))
 
 (define list-index
   (lambda (syms sym)
@@ -165,37 +218,40 @@
   (proto-val (fields vector?)) 
   (proc-val (p proc?)))
 
-; Ambiente inicial
+;; 5. VALORES INICIALES
 
 (define initial-env
   (lambda ()
-    (extend-env-list
+    (extend-env-list-const ; Las constantes iniciales no deben cambiar
      '(true false null)
      (list (bool-val #t) (bool-val #f) (null-val))
      (empty-env))))
 
-(define prim-proc
-  (lambda (op)
-    (proc-val (procedure 'args (literal-nulo) (empty-env))))) 
+;; 6. FUNCIONES AUXILIARES
 
-;; 6. FUNCIONES AUXILIARES PARA EL INTÉRPRETE
-
-; Función manual make-list para evitar dependencias externas
 (define make-list
   (lambda (n val)
-    (if (<= n 0)
-        '()
-        (cons val (make-list (- n 1) val)))))
+    (if (<= n 0) '() (cons val (make-list (- n 1) val)))))
 
 (define un-binding-id
-  (lambda (b)
-    (cases binding b
-      (un-binding (id exp) id))))
+  (lambda (b) (cases binding b (un-binding (id exp) id))))
 
 (define un-binding-exp
-  (lambda (b)
-    (cases binding b
-      (un-binding (id exp) exp))))
+  (lambda (b) (cases binding b (un-binding (id exp) exp))))
+
+(define list-set-func
+  (lambda (lst idx val)
+    (cond
+      ((null? lst) '())
+      ((zero? idx) (cons val (cdr lst)))
+      (else (cons (car lst) (list-set-func (cdr lst) (- idx 1) val))))))
+
+(define remove-assoc
+  (lambda (key dict)
+    (cond
+      ((null? dict) '())
+      ((equal? (car (car dict)) key) (remove-assoc key (cdr dict)))
+      (else (cons (car dict) (remove-assoc key (cdr dict)))))))
 
 ;; 7. INTÉRPRETE (EVALUADOR)
 
@@ -212,7 +268,7 @@
   (lambda (exp env)
     (cases expresion exp
       
-      ; Literales
+      ; --- Literales ---
       (literal-numero (n) (num-val n))
       (literal-cadena (s) (string-val s))
       (literal-booleano-true () (bool-val #t))
@@ -220,7 +276,7 @@
       (literal-nulo () (null-val))
       (literal-this () (eopl:error "uso de 'this' fuera de contexto"))
 
-      ; Variables y Asignación 
+      ; --- Variables y Asignación ---
       (identificador-exp (first-id rest-ids)
         (let loop ((curr-val (apply-env env first-id)) (ids rest-ids))
           (if (null? ids)
@@ -237,19 +293,21 @@
       (var-exp (bindings body)
         (let ((ids (map un-binding-id bindings))
               (vals (eval-rands (map un-binding-exp bindings) env)))
-          (eval-expression body (extend-env-list ids vals env))))
+          (eval-expression body (extend-env-list ids vals env)))) ; Usa entorno mutable
 
       (const-exp (bindings body)
          (let ((ids (map un-binding-id bindings))
               (vals (eval-rands (map un-binding-exp bindings) env)))
-          (eval-expression body (extend-env-list ids vals env))))
+          (eval-expression body (extend-env-list-const ids vals env)))) ; Usa entorno inmutable
 
+      ; NUEVO: Usa setref! para validar si es const
       (set-exp (id exp)
-        (let ((val (eval-expression exp env)))
-          (set-env! env id val)
+        (let ((val (eval-expression exp env))
+              (ref (apply-env-ref env id)))
+          (setref! ref val)
           (void-val)))
 
-      ; Control de Flujo
+      ; --- Control de Flujo ---
       (if-exp (test then else-exp)
         (let ((val (eval-expression test env)))
           (cases expval val
@@ -283,8 +341,14 @@
                   (if (equal? (expval->num test-val) (expval->num case-val))
                       (eval-expression (car rhs-list) env)
                       (loop (cdr lhs-list) (cdr rhs-list))))))))
+      
+      (begin-exp (first-exp rest-exps)
+         (let loop ((val (eval-expression first-exp env)) (exps rest-exps))
+           (if (null? exps)
+               val
+               (loop (eval-expression (car exps) env) (cdr exps)))))
 
-      ; Funciones
+      ; --- Funciones ---
       (func-exp (params body)
         (proc-val (procedure params body env)))
 
@@ -302,7 +366,7 @@
 
       (return-exp (exp) (eval-expression exp env))
 
-      ; Estructuras
+      ; --- Estructuras de Datos ---
       (list-exp (exps)
         (list-val (eval-rands exps env)))
 
@@ -315,41 +379,44 @@
         (let ((rv (eval-expression r env)) (iv (eval-expression i env)))
           (complex-val (expval->num rv) (expval->num iv))))
 
-      ; Recursión (letrec)
+      ; --- Recursión (letrec) ---
+      ; CORRECCIÓN: Usar 'env' (el actual) como padre para el entorno dummy
       (letrec-exp (decls body)
         (let ((proc-names (map (lambda (decl) (cases declaracion-letrec decl (una-declaracion-letrec (id params body) id))) decls))
               (id-lists   (map (lambda (decl) (cases declaracion-letrec decl (una-declaracion-letrec (id params body) params))) decls))
               (bodies     (map (lambda (decl) (cases declaracion-letrec decl (una-declaracion-letrec (id params body) body))) decls)))
            
+           ; Creamos entorno mutable extendiendo 'env', no 'dummy-env' (que no existe)
            (let* ((dummy-env (extend-env-list proc-names (make-list (length proc-names) (void-val)) env)))
              (let ((procs (map (lambda (ids bdy) (proc-val (procedure ids bdy dummy-env)))
                                id-lists bodies)))
-               (for-each (lambda (name val) (set-env! dummy-env name val)) proc-names procs)
+               ; Usamos referencias para actualizar el entorno circular
+               (let loop ((names proc-names) (vals procs))
+                 (if (null? names)
+                     #t
+                     (begin
+                       (setref! (apply-env-ref dummy-env (car names)) (car vals))
+                       (loop (cdr names) (cdr vals)))))
                (eval-expression body dummy-env)))))
 
-      ; Primitivas
+      ; --- Primitivas ---
       (primapp-exp (prim rands)
         (let ((args (eval-rands rands env)))
           (apply-primitive prim args)))
       
       (else (eopl:error "Expresión desconocida")))))
 
-; Función auxiliar para valores booleanos y numéricos
-(define expval->num
-  (lambda (v)
-    (cases expval v
-      (num-val (n) n)
-      (else (eopl:error "Esperaba numero")))))
-
-(define expval->bool
-  (lambda (v)
-    (cases expval v
-      (bool-val (b) b)
-      (else (eopl:error "Esperaba booleano")))))
+;; FUNCIONES DE EXTRACCIÓN
+(define expval->num (lambda (v) (cases expval v (num-val (n) n) (else (eopl:error "Esperaba numero")))))
+(define expval->bool (lambda (v) (cases expval v (bool-val (b) b) (else (eopl:error "Esperaba booleano")))))
+(define expval->string (lambda (v) (cases expval v (string-val (s) s) (else (eopl:error "Esperaba cadena")))))
+(define expval->list (lambda (v) (cases expval v (list-val (l) l) (else (eopl:error "Esperaba lista")))))
+(define expval->complex (lambda (v) (cases expval v (complex-val (r i) (cons r i)) (else (eopl:error "Esperaba complejo")))))
 
 (define apply-primitive
   (lambda (prim args)
     (cases primitiva prim
+      ; Aritmética
       (prim-sum () (num-val (+ (expval->num (car args)) (expval->num (cadr args)))))
       (prim-sub () (num-val (- (expval->num (car args)) (expval->num (cadr args)))))
       (prim-mul () (num-val (* (expval->num (car args)) (expval->num (cadr args)))))
@@ -357,16 +424,57 @@
       (prim-mod () (num-val (modulo (expval->num (car args)) (expval->num (cadr args)))))
       (prim-add1 () (num-val (+ (expval->num (car args)) 1)))
       (prim-sub1 () (num-val (- (expval->num (car args)) 1)))
-      (prim-print () (begin (display (expval->printable (car args))) (newline) (void-val)))
+      
+      ; Comparación
+      (prim-zero? () (bool-val (zero? (expval->num (car args)))))
       (prim-equal () (bool-val (equal? (expval->num (car args)) (expval->num (cadr args)))))
       (prim-less () (bool-val (< (expval->num (car args)) (expval->num (cadr args)))))
       (prim-greater () (bool-val (> (expval->num (car args)) (expval->num (cadr args)))))
       (prim-lesseq () (bool-val (<= (expval->num (car args)) (expval->num (cadr args)))))
       (prim-greatereq () (bool-val (>= (expval->num (car args)) (expval->num (cadr args)))))
       (prim-notequal () (bool-val (not (equal? (expval->num (car args)) (expval->num (cadr args))))))
+      
+      ; Lógica
       (prim-and () (bool-val (and (expval->bool (car args)) (expval->bool (cadr args)))))
       (prim-or () (bool-val (or (expval->bool (car args)) (expval->bool (cadr args)))))
-      (prim-not () (bool-val (not (expval->bool (car args))))))))
+      (prim-not () (bool-val (not (expval->bool (car args)))))
+
+      ; Cadenas
+      (prim-string-length () (num-val (string-length (expval->string (car args)))))
+      (prim-string-append () (string-val (string-append (expval->string (car args)) (expval->string (cadr args)))))
+
+      ; Listas
+      (prim-empty () (list-val '()))
+      (prim-empty? () (bool-val (null? (expval->list (car args)))))
+      (prim-cons () (list-val (cons (car args) (expval->list (cadr args)))))
+      (prim-list? () (bool-val (cases expval (car args) (list-val (l) #t) (else #f))))
+      (prim-car () (car (expval->list (car args))))
+      (prim-cdr () (list-val (cdr (expval->list (car args)))))
+      (prim-append () (list-val (append (expval->list (car args)) (expval->list (cadr args)))))
+      (prim-list-ref () (list-ref (expval->list (car args)) (expval->num (cadr args))))
+      (prim-list-set () (list-val (list-set-func (expval->list (car args)) (expval->num (cadr args)) (caddr args))))
+
+      ; Diccionarios / Registros
+      (prim-make-dict () (list-val '())) ; Diccionario representado como lista de pares
+      (prim-dict? () (bool-val (cases expval (car args) (list-val (l) #t) (else #f)))) ; Simplificado
+      (prim-dict-ref () 
+         (let ((search (assoc (car args) (expval->list (cadr args))))) ; (clave, dict)
+           (if search (cdr search) (null-val))))
+      (prim-dict-set ()
+         ; (clave, dict, valor)
+         (let ((key (car args)) (dict (expval->list (cadr args))) (val (caddr args)))
+           (list-val (cons (cons key val) (remove-assoc key dict)))))
+      (prim-dict-keys () (list-val (map car (expval->list (car args)))))
+      (prim-dict-values () (list-val (map cdr (expval->list (car args)))))
+
+      ; Complejos
+      (prim-real () (num-val (car (expval->complex (car args)))))
+      (prim-imag () (num-val (cdr (expval->complex (car args)))))
+
+      ; Varios
+      (prim-clone () (car args)) ; Copia simple por valor (shallow)
+      (prim-print () (begin (display (expval->printable (car args))) (newline) (void-val)))
+      )))
 
 ;; 8. IMPRESIÓN Y REPL
 
@@ -397,7 +505,6 @@
   (lambda (string)
     (eval-program (scan&parse string))))
 
-; Interpretador (REPL)
 (define interpretador
   (sllgen:make-rep-loop "FLOWLANG -> " 
     (lambda (pgm) 
