@@ -1,12 +1,11 @@
 #lang eopl
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; FLOWLANG - PASO 1: SISTEMA DE REFERENCIAS Y MUTABILIDAD
-;; 
-;; Cambios en esta versión:
-;; 1. CORRECCIÓN: Se arregló el error de scope en letrec-exp.
-;; 2. Se mantiene el sistema de referencias (a-ref vs const-ref).
-;; 3. Se mantiene la protección de constantes en setref!.
+;; FLOWLANG
+;; Venus Juliana Paipilla y Daniel Arias Castrillón
+;; Proyecto Final - Fundamentos de Lenguajes de Programación
+;; Profesor: Robinson Duque, Ph.D
+;; Universidad del Valle, 2025
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;; 1. ESPECIFICACIÓN LÉXICA
