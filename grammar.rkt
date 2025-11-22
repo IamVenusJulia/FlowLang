@@ -5,7 +5,7 @@
 ;; Venus Juliana Paipilla - 2343803
 ;; Daniel Arias Castrillón - 2222205
 ;; Proyecto Final - Fundamentos de Lenguajes de Programación
-;; Link del git: https://github.com/IamVenusJulia/FlowLang.git
+;; Link del git: https://github.com/IamVenusJulia/FlowLang/tree/develop
 ;; Profesor: Robinson Duque, Ph.D
 ;; Universidad del Valle, 2025
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
