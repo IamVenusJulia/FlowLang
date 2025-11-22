@@ -555,7 +555,7 @@
                                                         (cdr lst))))))
                        "]"))
       (complex-val (r i) (string-append (number->string r) "+" (number->string i) "i"))
-      ; Implementación de impresión detallada de campos del objeto (similar a V1),
+      ; Implementación de impresión detallada de campos del objeto,
       ; pero conservando el indicador de herencia por prototipos.
       (proto-val (fields-vec env parent)
         (let ((fields (vector-ref fields-vec 0))) ; Obtener la lista de pares (id . valor)
