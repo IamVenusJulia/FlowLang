@@ -174,10 +174,14 @@
     (parametros (list-of symbol?))
     (cuerpo expresion?)
     (ambiente-guardado ambiente?)))
-; Definición de referencia para ambientes mutables
-(define-datatype reference reference?
-  (a-ref (pos integer?)
-         (vec vector?)))
+
+
+;Ambientes
+(define-datatype procedimiento procedimiento?
+  (cierre
+    (parametros (list-of symbol?))
+    (cuerpo expresion?)
+    (ambiente-guardado ambiente?)))
 
 ; Ambiente mejorado con mutabilidad
 (define-datatype environment environment?
