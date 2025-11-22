@@ -5,6 +5,7 @@
 ;; Venus Juliana Paipilla - 2343803
 ;; Daniel Arias Castrillón - 2222205
 ;; Proyecto Final - Fundamentos de Lenguajes de Programación
+;; Link del git: https://github.com/IamVenusJulia/FlowLang.git
 ;; Profesor: Robinson Duque, Ph.D
 ;; Universidad del Valle, 2025
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -34,7 +35,7 @@
     ; Binding auxiliar para letrec
     (declaracion-letrec (identificador "(" (separated-list identificador ",") ")" "=" expresion) una-declaracion-letrec)
     
-    ; --- Nonterminal para Herencia Opcional ---
+    ; --- Nuevo Nonterminal para Herencia Opcional ---
     (clausula-extends () no-extends) ; Opción 1: vacío
     (clausula-extends ("extends" identificador ";") con-extends) ; Opción 2: herencia
 
@@ -261,7 +262,7 @@
       (else (cons (car dict) (remove-assoc key (cdr dict)))))))
       
 ; --- Lógica de Búsqueda de Campos con Delegación (Herencia) ---
-; 
+
 (define find-field-in-object 
   (lambda (obj field-id)
     (cases expval obj
@@ -430,7 +431,6 @@
       (list-exp (exps)
         (list-val (eval-rands exps env)))
         
-      ; CORRECCIÓN: Usar 'complejo-exp' en lugar de 'complex-exp'
       (complejo-exp (r i)
         (let ((rv (eval-expression r env)) (iv (eval-expression i env)))
           (complex-val (expval->num rv) (expval->num iv))))
@@ -555,13 +555,23 @@
                                                         (cdr lst))))))
                        "]"))
       (complex-val (r i) (string-append (number->string r) "+" (number->string i) "i"))
-      ; Imprimimos el objeto, si tiene padre, lo muestra (pero no recursivamente)
-      (proto-val (f e p) 
-        (string-append "{objeto" 
-                       (cases expval p
-                         (null-val () "")
-                         (else " extends ...")) ; Evitamos imprimir recursivamente el padre completo
-                       "}"))
+      ; Implementación de impresión detallada de campos del objeto (similar a V1),
+      ; pero conservando el indicador de herencia por prototipos.
+      (proto-val (fields-vec env parent)
+        (let ((fields (vector-ref fields-vec 0))) ; Obtener la lista de pares (id . valor)
+          (string-append "{"
+                         (if (null? fields)
+                             ""
+                             (let ((first-pair (car fields)))
+                               (string-append (symbol->string (car first-pair)) ": " (expval->printable (cdr first-pair))
+                                 (apply string-append
+                                   (map (lambda (p)
+                                          (string-append ", " (symbol->string (car p)) ": " (expval->printable (cdr p))))
+                                        (cdr fields))))))
+                         (cases expval parent ; Indicador de prototipo
+                           (null-val () "")
+                           (else " extends ..."))
+                         "}")))
       (proc-val (p) "#<procedure>"))))
 
 (define run
